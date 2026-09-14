@@ -51,7 +51,6 @@ void esp_timer_impl_update_apb_freq(
 static constexpr const uint16_t label_ui_text_color = 0x8610u;
 
 static constexpr const int32_t header_ui_height = 24;
-static constexpr const int32_t battery_ui_width = 4;
 static constexpr const uint8_t mlx_width        = 16;
 static constexpr const uint8_t mlx_height       = 24;
 
@@ -811,7 +810,8 @@ class qrcode_ui_t : public ui_base_t {
     void draw(draw_param_t* param, M5Canvas* canvas, int32_t canvas_y,
               int32_t h) override {
         canvas->fillScreen(TFT_WHITE);
-        float zoom = (float)_client_rect.h / (_qr_canvas.height() + 4);
+        // Leave the required four-module quiet zone on each side.
+        float zoom = (float)_client_rect.h / (_qr_canvas.height() + 8);
         _qr_canvas.pushRotateZoom(
             canvas, _client_rect.x + (_client_rect.w >> 1),
             _client_rect.y + (_client_rect.h >> 1) - canvas_y, 0, zoom, zoom);
@@ -1842,27 +1842,6 @@ void config_param_t::misc_color_func(misc_color_t v) {
     draw_param.color_map = color_map_table[v];
 }
 
-class battery_ui_t : public ui_base_t {
-    int8_t prev_battery_level = 0;
-
-   public:
-    void update(draw_param_t* param) override {
-        prev_battery_level =
-            smooth_move(param->battery_level, prev_battery_level);
-    }
-
-    void draw(draw_param_t* param, M5Canvas* canvas, int32_t canvas_y,
-              int32_t h) override {
-        int32_t x     = _client_rect.x;
-        int32_t y     = _client_rect.y - canvas_y;
-        int32_t bat_h = (100 - prev_battery_level) * _client_rect.h / 100;
-
-        uint32_t fg = param->battery_state ? 0x00FF00u : 0x8080FFu;
-        canvas->fillRect(x, y, _client_rect.w, bat_h, 0xFF0000u);
-        canvas->fillRect(x, y + bat_h, _client_rect.w, _client_rect.h, fg);
-    }
-};
-
 class header_ui_t : public ui_base_t {
     std::string _text;
     int32_t _text_width;
@@ -1897,13 +1876,7 @@ class header_ui_t : public ui_base_t {
                             draw_param.net_apmode_ipaddr.toString().c_str()));
                 } else if (WiFi.getMode() == WIFI_STA) {
                     if (draw_param.sys_ssid.empty()) {
-                        if (param->net_setup_mode ==
-                            param->net_setup_mode_smartconfig) {
-                            _text =
-                                "Please download and use \"ESP TOUCH\" app.  ";
-                        } else {
-                            _text = "Please setting WiFi at first.  ";
-                        }
+                        _text = "Please setting WiFi at first.  ";
                     } else if (WiFi.isConnected()) {
                         _text.assign(
                             cbuf, snprintf(cbuf, sizeof(cbuf), "SSID:%s  /  ",
@@ -1911,7 +1884,7 @@ class header_ui_t : public ui_base_t {
                         _text.append(
                             cbuf,
                             snprintf(cbuf, sizeof(cbuf), "mDNS:%s.local  /  ",
-                                     draw_param.net_apmode_ssid));
+                                     draw_param.net_hostname.c_str()));
                         _text.append(
                             cbuf, snprintf(cbuf, sizeof(cbuf), "STA IP:%s  /  ",
                                            WiFi.localIP().toString().c_str()));
@@ -1969,6 +1942,25 @@ class header_ui_t : public ui_base_t {
 
         int xpos = _client_rect.right();
         {
+            // Battery shares the existing status row with Wi-Fi and cloud.
+            xpos -= 18;
+            const int y = _client_rect.y - canvas_y + 2;
+            const bool charging =
+                param->battery_state == m5::Power_Class::is_charging;
+            const bool unknown =
+                param->battery_state == m5::Power_Class::charge_unknown;
+            const uint32_t color =
+                charging ? 0x00FF00u : (unknown ? 0x808080u : 0xFFFFFFu);
+            canvas->drawRect(xpos, y, 14, 10, color);
+            canvas->fillRect(xpos + 14, y + 3, 2, 4, color);
+            if (param->battery_level >= 0) {
+                canvas->fillRect(xpos + 2, y + 2,
+                                 param->battery_level * 10 / 100, 6, color);
+            } else {
+                canvas->drawFastHLine(xpos + 4, y + 5, 6, color);
+            }
+        }
+        {
             size_t level = 0;
             if (param->net_running_mode & param->net_running_mode_lan) {
                 level = 1;
@@ -1980,7 +1972,7 @@ class header_ui_t : public ui_base_t {
                             : (rssi <= -75) ? 4
                                             : 5;
             }
-            xpos -= 14;
+            xpos -= 16;
             // canvas->drawBitmap(xpos+1, _client_rect.y - canvas_y,
             // icon_wifi[level], 16, 12, TFT_WHITE);
             canvas->pushImage(xpos, _client_rect.y - canvas_y, 16, 14,
@@ -2019,9 +2011,20 @@ class header_ui_t : public ui_base_t {
                     canvas->setTextSize(1);
                     canvas->setTextColor(TFT_WHITE);
                     canvas->setTextDatum(textdatum_t::top_right);
-                    xpos -= canvas->drawNumber(param->cloud_countdown_sec, xpos,
-                                               _client_rect.y - canvas_y - 1,
-                                               &fonts::Font2);
+                    char countdown[8];
+                    snprintf(countdown, sizeof(countdown), "%u",
+                             unsigned(param->cloud_countdown_sec));
+                    const lgfx::IFont* font = &fonts::Font2;
+                    if (canvas->textWidth(countdown, font) >
+                        xpos - _client_rect.x) {
+                        font = &fonts::Font0;
+                    }
+                    // Narrow layouts prioritize the three status icons.
+                    if (canvas->textWidth(countdown, font) <=
+                        xpos - _client_rect.x) {
+                        xpos -= canvas->drawString(
+                            countdown, xpos, _client_rect.y - canvas_y, font);
+                    }
                 }
             }
         }
@@ -2242,7 +2245,7 @@ class image_ui_t : public ui_base_t {
                            param->range_temp_lower)
                           << 8) /
                          param->temp_diff;
-            v3 = (v3 < 0) ? 0 : (v3 > 255) ? 255 : v3;
+            v3         = (v3 < 0) ? 0 : (v3 > 255) ? 255 : v3;
             int32_t x1 = 0;
             for (int32_t fx = 1; fx < frame_width; ++fx) {
                 int32_t x0       = x1;
@@ -2278,7 +2281,7 @@ class image_ui_t : public ui_base_t {
                               canvas->getBuffer())[_client_rect.x + x0 +
                                                    ypos * canvas->width()];
                     for (int32_t bx = 0; bx < boxWidth; ++bx) {
-                        uint32_t v   = (v02 * (boxWidth - bx) + v13 * bx) >> 16;
+                        uint32_t v  = (v02 * (boxWidth - bx) + v13 * bx) >> 16;
                         img_buf[bx] = m5gfx::getSwap16(param->color_map[v]);
                     }
                 }
@@ -2659,7 +2662,6 @@ hist_ui_t hist_ui;
 image_ui_t image_ui;
 graph_ui_t graph_ui;
 header_ui_t header_ui;
-battery_ui_t battery_ui;
 
 void changeLayout_Config(void) {
     draw_param.in_config_mode = true;
@@ -2679,12 +2681,9 @@ uint8_t changeLayout(uint8_t layout_idx) {
     int disp_w = display.width();
     int disp_h = display.height();
 
-    battery_ui.setTargetRect(
-        {disp_w - battery_ui_width, 0, battery_ui_width, disp_h});
-    // battery_ui.setTargetRect({disp_w + 2, 0, battery_line_width, disp_h});
     const int32_t ox = 1;
     const int32_t oy = 1;
-    disp_w -= (ox * 2) + battery_ui_width;
+    disp_w -= ox * 2;
     disp_h -= (oy * 2);
 
     // in_config_mode = layout_idx & 0x80;
@@ -2898,9 +2897,8 @@ uint8_t changeLayout(uint8_t layout_idx) {
 }
 
 void drawTask(void*) {
-    ui_base_t* ui_list[] = {&battery_ui, &text_ui,   &hist_ui,
-                            &image_ui,   &graph_ui,  &config_ui,
-                            &header_ui,  &qrcode_ui, &overlay_ui};
+    ui_base_t* ui_list[] = {&text_ui,   &hist_ui,   &image_ui,  &graph_ui,
+                            &config_ui, &header_ui, &qrcode_ui, &overlay_ui};
     static constexpr const uint32_t disp_buf_height = 16;
     static constexpr const size_t disp_buf_count =
         3;  // 描画バッファの数。jpegエンコーダのqueueにセットする分があるため3とする
@@ -3074,15 +3072,27 @@ static bool sync_rtc_ntp(void) {
     return true;
 }
 
+static void releaseWiFiScan(void) {
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+        esp_wifi_scan_stop();
+        const uint32_t timeout_at = millis() + 100;
+        while (WiFi.scanComplete() == WIFI_SCAN_RUNNING &&
+               int32_t(millis() - timeout_at) < 0) {
+            delay(1);
+        }
+    }
+    WiFi.scanDelete();
+}
+
 // volatile bool requestWiFi = false;
 
 static void wifiTask(void*) {
     bool rtc_sync = false;
     config_param_t::net_setup_mode_t prev_net_setup_mode =
         config_param_t::net_setup_mode_off;
-    bool prev_ap_connected  = false;
-    bool prev_sta_connected = false;
-    int connecting_retry    = 0;
+    bool prev_ap_connected    = false;
+    bool prev_sta_connected   = false;
+    uint32_t connect_retry_at = millis() + 15000;
 
     for (;;) {
         delay(1);
@@ -3090,7 +3100,7 @@ static void wifiTask(void*) {
             prev_sta_connected = !prev_sta_connected;
             if (!prev_sta_connected) {
                 soundWiFiDisconnected();
-                connecting_retry = 0;
+                connect_retry_at = millis();
             } else {
                 soundWiFiConnected();
                 configTime(draw_param.oncloud_timezone_sec, 0, ntp_server[0],
@@ -3131,12 +3141,8 @@ static void wifiTask(void*) {
                 default:
                     break;
 
-                case config_param_t::net_setup_mode_smartconfig:
-                    WiFi.stopSmartConfig();
-                    break;
-
                 case config_param_t::net_setup_mode_accesspoint:
-                    WiFi.scanDelete();
+                    releaseWiFiScan();
                     dnsServer.stop();
                     break;
             }
@@ -3150,28 +3156,22 @@ static void wifiTask(void*) {
                                             ~wifi_mode_t::WIFI_MODE_AP));
                     break;
 
-                case config_param_t::net_setup_mode_smartconfig:
-                    draw_param.net_running_mode =
-                        draw_param.net_running_mode_offline;
-                    WiFi.mode(wifi_mode_t::WIFI_MODE_STA);
-                    WiFi.beginSmartConfig();
-                    break;
-
                 case config_param_t::net_setup_mode_accesspoint:
                     draw_param.net_running_mode =
                         draw_param.net_running_mode_offline;
-                    WiFi.softAP(draw_param.net_apmode_ssid,
-                                draw_param.net_apmode_pass);
+                    WiFi.mode(wifi_mode_t::WIFI_MODE_APSTA);
                     WiFi.softAPConfig(draw_param.net_apmode_ipaddr,
                                       draw_param.net_apmode_ipaddr,
                                       draw_param.net_apmode_subnet);
-                    WiFi.mode(wifi_mode_t::WIFI_MODE_APSTA);
+                    WiFi.softAP(draw_param.net_apmode_ssid,
+                                draw_param.net_apmode_pass, 1, false, 4);
                     WiFi.scanNetworks(true);
                     dhcps_dns_setserver(&(draw_param.dnsip));
                     static const uint16_t DNS_PORT = 53;
                     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
                     dnsServer.start(DNS_PORT, "*",
                                     draw_param.net_apmode_ipaddr);
+                    qrcode_ui.show(draw_param.net_ap_wifi_qr.c_str());
                     break;
             }
         }
@@ -3185,26 +3185,11 @@ static void wifiTask(void*) {
                         if (prev_ap_connected) {
                             soundWiFiConnected();
                             qrcode_ui.show(draw_param.net_ap_url.c_str());
-                            // qrcode_ui.show(draw_param.net_url.c_str());
                         } else {
-                            qrcode_ui.hide();
+                            qrcode_ui.show(draw_param.net_ap_wifi_qr.c_str());
                         }
                     }
                     break;
-
-                case draw_param.net_setup_mode_smartconfig:
-                    if (WiFi.smartConfigDone()) {
-                        draw_param.net_tmp_ssid.clear();
-                        draw_param.net_tmp_pwd.clear();
-                        if (draw_param.net_running_mode ==
-                            draw_param.net_running_mode_offline) {
-                            draw_param.net_running_mode =
-                                draw_param.net_running_mode_lan_cloud;
-                        }
-                        draw_param.net_setup_mode =
-                            draw_param.net_setup_mode_off;
-                    }
-                    continue;
 
                 default:
                     break;
@@ -3221,30 +3206,44 @@ static void wifiTask(void*) {
         //     == 0) { continue; }
         // }
 
+        const bool wifi_requested = (bool)draw_param.request_wifi_state;
+        const bool ap_setup_active =
+            draw_param.net_setup_mode == draw_param.net_setup_mode_accesspoint;
+        const bool sta_enabled = WiFi.getMode() & WIFI_MODE_STA;
         if (!need_wifi_reconnect &&
-            (((bool)draw_param.request_wifi_state) == WiFi.isConnected())) {
+            (wifi_requested
+                 ? WiFi.isConnected()
+                 : (ap_setup_active ? !WiFi.isConnected() : !sta_enabled))) {
             continue;
         }
 
-        if ((need_wifi_reconnect || !((bool)draw_param.request_wifi_state))) {
-            WiFi.disconnect(need_wifi_reconnect ||
-                            draw_param.net_setup_mode ==
-                                draw_param.net_setup_mode_off);
-            need_wifi_reconnect = false;
-            // WiFi.mode(WIFI_MODE_NULL);
-        } else {
-            if (connecting_retry) {
-                --connecting_retry;
+        if (need_wifi_reconnect || !wifi_requested) {
+            if (!wifi_requested && !ap_setup_active) {
+                releaseWiFiScan();
+                WiFi.disconnect(false);
+                WiFi.mode(WIFI_MODE_NULL);
+                ESP_EARLY_LOGD("DEBUG", "WiFi radio off mode:%u",
+                               WiFi.getMode());
+            } else {
+                WiFi.disconnect(need_wifi_reconnect ||
+                                draw_param.net_setup_mode ==
+                                    draw_param.net_setup_mode_off);
             }
-            if (connecting_retry == 0) {
+            need_wifi_reconnect = false;
+            connect_retry_at    = millis();
+        } else {
+            if (int32_t(millis() - connect_retry_at) >= 0) {
                 if (!draw_param.net_tmp_ssid.empty()) {
+                    releaseWiFiScan();
                     WiFi.begin(draw_param.net_tmp_ssid.c_str(),
                                draw_param.net_tmp_pwd.c_str());
-                    connecting_retry = 64;
                 } else {
                     WiFi.begin();
-                    connecting_retry = 512;
                 }
+                // Association and DHCP may take several seconds. Reissuing
+                // begin() during that interval aborts the attempt with
+                // ASSOC_LEAVE and can destabilize the Wi-Fi driver.
+                connect_retry_at = millis() + 15000;
                 ESP_EARLY_LOGD("DEBUG", "WiFi begin() status:%d",
                                WiFi.status());
             }
@@ -3524,7 +3523,10 @@ void setup(void) {
         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), MALLOC_CAP_8BIT);
 
     display.setBrightness(32);
-    M5.begin();
+    auto m5cfg = M5.config();
+    // T-Lite does not use an IMU (StickC-Plus SE has none).
+    m5cfg.internal_imu = false;
+    M5.begin(m5cfg);
     M5.BtnPWR.setHoldThresh(1024);
     display.setRotation(1);
     display.drawBmp(bmp_logo, sizeof(bmp_logo), 0, 0, display.width(),
@@ -3561,11 +3563,6 @@ void setup(void) {
             draw_param.graph_data.data_len * sizeof(uint16_t));
     }
 
-    // webサーバタスクは loopと同じ APP_CPUプライオリティ1
-    // を指定、優劣をつけない
-    xTaskCreatePinnedToCore(webserverTask, "webTask", 6144, &draw_param, 1,
-                            nullptr, APP_CPU_NUM);
-
     // xTaskCreatePinnedToCore(screenshot_streamer_t::streamTask, "stream",
     // 2048, &screenshot_holder, 1, nullptr,
     //                         PRO_CPU_NUM);
@@ -3577,8 +3574,18 @@ void setup(void) {
     snprintf(draw_param.net_apmode_ssid, sizeof(draw_param.net_apmode_ssid),
              "T-Lite_%02x%02x", macaddr[4], macaddr[5]);
 
-    draw_param.net_hostname = draw_param.net_apmode_ssid;
-    draw_param.net_hostname += ".local";
+    // The generated SSID and fixed password contain no QR field delimiters.
+    draw_param.net_ap_wifi_qr = "WIFI:T:WPA;S:";
+    draw_param.net_ap_wifi_qr += draw_param.net_apmode_ssid;
+    draw_param.net_ap_wifi_qr += ";P:";
+    draw_param.net_ap_wifi_qr += draw_param.net_apmode_pass;
+    draw_param.net_ap_wifi_qr += ";;";
+
+    // DNS host labels cannot contain underscores. Keep the AP SSID unchanged.
+    char hostname[32];
+    snprintf(hostname, sizeof(hostname), "t-lite-%02x%02x", macaddr[4],
+             macaddr[5]);
+    draw_param.net_hostname = hostname;
 
     char cbuf[32];
 
@@ -3594,14 +3601,16 @@ void setup(void) {
 
     draw_param.net_url_mdns = "http://";
     draw_param.net_url_mdns += draw_param.net_hostname;
-    draw_param.net_url_mdns += "/";
+    draw_param.net_url_mdns += ".local/";
 
     draw_param.net_url_ip = draw_param.net_url_mdns;
 
     // snprintf(cbuf, sizeof(cbuf), "http://%s/",
     // draw_param.net_apmode_ipaddr.toString().c_str()); draw_param.net_ap_url =
     // cbuf;
-    draw_param.net_ap_url = draw_param.net_url_mdns + "wifi";
+    draw_param.net_ap_url =
+        "http://" +
+        std::string(draw_param.net_apmode_ipaddr.toString().c_str()) + "/wifi";
 
     snprintf(cbuf, sizeof(cbuf), "%02x%02x%02x%02x%02x%02x", macaddr[0],
              macaddr[1], macaddr[2], macaddr[3], macaddr[4], macaddr[5]);
@@ -3641,6 +3650,11 @@ void setup(void) {
         //     WiFi.begin("YOUR_DEFAULT_SSID", "YOUR_DEFAULT_PASSWORD");
         // }
     }
+
+    // webサーバタスクは loopと同じ APP_CPUプライオリティ1
+    // を指定、優劣をつけない
+    xTaskCreatePinnedToCore(webserverTask, "webTask", 6144, &draw_param, 1,
+                            nullptr, APP_CPU_NUM);
 
     xTaskCreatePinnedToCore(wifiTask, "wifiTask", 4096, nullptr, 3, nullptr,
                             PRO_CPU_NUM);
