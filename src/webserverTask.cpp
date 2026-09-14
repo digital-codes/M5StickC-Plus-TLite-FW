@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiServer.h>
 #include <ESPmDNS.h>
+#include <esp_heap_caps.h>
 #include <esp_wifi.h>
 #include <string>
 
@@ -890,6 +891,88 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
     return false;
 }
 
+static bool response_health(draw_param_t* draw_param, connection_t* conn) {
+    (void)draw_param;
+    auto client = &conn->client;
+
+    const size_t heap_free_8bit = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    const size_t heap_min_8bit =
+        heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+    const size_t heap_largest_8bit =
+        heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const size_t heap_free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA);
+    const size_t heap_largest_dma =
+        heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+
+    const TaskHandle_t wifi_task = xTaskGetHandle("wifiTask");
+    const TaskHandle_t stream_task = xTaskGetHandle("stream");
+    const UBaseType_t web_stack = uxTaskGetStackHighWaterMark(nullptr);
+    const UBaseType_t wifi_stack =
+        wifi_task ? uxTaskGetStackHighWaterMark(wifi_task) : 0;
+    const UBaseType_t stream_stack =
+        stream_task ? uxTaskGetStackHighWaterMark(stream_task) : 0;
+
+    const wifi_mode_t wifi_mode = WiFi.getMode();
+    const wl_status_t wifi_status = WiFi.status();
+    const bool sta_connected = wifi_status == WL_CONNECTED;
+    const IPAddress sta_ip = sta_connected ? WiFi.localIP() : IPAddress();
+    const IPAddress ap_ip =
+        (wifi_mode & WIFI_AP) ? WiFi.softAPIP() : IPAddress();
+
+    char body[768];
+    const int formatted_len = snprintf(
+        body, sizeof(body),
+        "{\n"
+        "  \"uptime_ms\": %lu,\n"
+        "  \"heap\": {\n"
+        "    \"free_8bit\": %u,\n"
+        "    \"minimum_free_8bit\": %u,\n"
+        "    \"largest_8bit\": %u,\n"
+        "    \"free_dma\": %u,\n"
+        "    \"largest_dma\": %u\n"
+        "  },\n"
+        "  \"stack_high_water\": {\n"
+        "    \"web\": %u,\n"
+        "    \"wifi\": %u,\n"
+        "    \"stream\": %u\n"
+        "  },\n"
+        "  \"wifi\": {\n"
+        "    \"mode\": %u,\n"
+        "    \"status\": %u,\n"
+        "    \"connected\": %s,\n"
+        "    \"rssi\": %d,\n"
+        "    \"sta_ip\": \"%u.%u.%u.%u\",\n"
+        "    \"ap_ip\": \"%u.%u.%u.%u\",\n"
+        "    \"ap_clients\": %u\n"
+        "  }\n"
+        "}\n",
+        static_cast<unsigned long>(millis()),
+        static_cast<unsigned>(heap_free_8bit),
+        static_cast<unsigned>(heap_min_8bit),
+        static_cast<unsigned>(heap_largest_8bit),
+        static_cast<unsigned>(heap_free_dma),
+        static_cast<unsigned>(heap_largest_dma),
+        static_cast<unsigned>(web_stack), static_cast<unsigned>(wifi_stack),
+        static_cast<unsigned>(stream_stack), static_cast<unsigned>(wifi_mode),
+        static_cast<unsigned>(wifi_status), sta_connected ? "true" : "false",
+        sta_connected ? WiFi.RSSI() : 0, sta_ip[0], sta_ip[1], sta_ip[2],
+        sta_ip[3], ap_ip[0], ap_ip[1], ap_ip[2], ap_ip[3],
+        static_cast<unsigned>(WiFi.softAPgetStationNum()));
+    const size_t body_len =
+        formatted_len < 0
+            ? 0
+            : std::min(static_cast<size_t>(formatted_len), sizeof(body) - 1);
+
+    client->print(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+        "close\r\nCache-Control: no-cache\r\n");
+    client->printf("Content-Length: %u\r\n\r\n",
+                   static_cast<unsigned>(body_len));
+    client->write(reinterpret_cast<const uint8_t*>(body), body_len);
+    return false;
+}
+
 static bool response_top(draw_param_t* draw_param, connection_t* conn) {
     auto client = &conn->client;
     if ((WiFi.getMode() & WIFI_AP) && !WiFi.isConnected()) {
@@ -920,6 +1003,7 @@ static bool response_top(draw_param_t* draw_param, connection_t* conn) {
         "<a href=\"/main\">Browser control</a>\n"
         "<a href=\"/text\">Text infomation</a>\n"
         "<a href=\"/json\">JSON data</a>\n"
+        "<a href=\"/health\">System health</a>\n"
         "<a href=\"/stream\">Stream Image</a>\n"
         "</div></div>\n";
 
@@ -1004,7 +1088,7 @@ static constexpr const response_table_t response_table[] = {
     {"/", response_top},        {"/main", response_main},
     {"/json", response_json},   {"/text", response_text},
     {"/wifi", response_wifi},   {"/stream", response_stream},
-    {"/param", response_param},
+    {"/param", response_param}, {"/health", response_health},
     // { "/test"   , response_test },
 };
 
