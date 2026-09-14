@@ -920,6 +920,10 @@ void webserverTask(void* arg) {
     uint8_t connection_index  = 0;
     uint32_t conn_idx         = 0;
     bool prev_connected       = false;
+    bool mdns_started         = false;
+    uint32_t mdns_retry_at     = 0;
+    uint32_t prev_sta_ip       = 0;
+    uint32_t prev_ap_ip        = 0;
     uint8_t restart_countdown = 0;
     uint8_t prev_active_count = 0;
     uint8_t active_count      = 0;
@@ -950,16 +954,36 @@ void webserverTask(void* arg) {
                 httpServer.begin();
                 // httpServer.setTimeout(3);
                 // httpServer.setNoDelay(true);
-                MDNS.begin(draw_param->net_apmode_ssid);
-                MDNS.addService("http", "tcp", 80);
                 // ESP_EARLY_LOGD("DEBUG","httpServer begin");
             } else {
-                MDNS.end();
                 for (auto& conn : connection) {
                     conn.stop();
                 }
                 httpServer.end();
                 // ESP_EARLY_LOGD("DEBUG","httpServer end");
+            }
+        }
+        // AP and STA may change without the HTTP server becoming disconnected.
+        const uint32_t sta_ip = WiFi.isConnected() ? uint32_t(WiFi.localIP()) : 0;
+        const uint32_t ap_ip = (WiFi.getMode() & WIFI_MODE_AP)
+                                   ? uint32_t(WiFi.softAPIP()) : 0;
+        if (!connected || sta_ip != prev_sta_ip || ap_ip != prev_ap_ip) {
+            if (mdns_started) MDNS.end();
+            mdns_started = false;
+            mdns_retry_at = millis();
+            prev_sta_ip = sta_ip;
+            prev_ap_ip = ap_ip;
+        }
+        if (connected && !mdns_started &&
+            int32_t(millis() - mdns_retry_at) >= 0) {
+            mdns_started = MDNS.begin(draw_param->net_hostname.c_str());
+            if (mdns_started) {
+                MDNS.addService("http", "tcp", 80);
+            } else {
+                // begin() may fail after allocating the responder.
+                MDNS.end();
+                ESP_LOGW("mDNS", "Responder startup failed; retrying in 5 seconds");
+                mdns_retry_at = millis() + 5000;
             }
         }
         if (!connected) {

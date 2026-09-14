@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <M5GFX.h>
+#include <M5Unified.h>
 #include <WiFi.h>
 
 static constexpr const uint8_t firmware_ver_major = 0;
@@ -831,14 +832,11 @@ struct config_param_t {
 
     enum net_setup_mode_t {
         net_setup_mode_off,
-        net_setup_mode_smartconfig,
         net_setup_mode_accesspoint,
         // net_wifi_mode_keep_connect,
         // net_wifi_mode_uploading,
         net_setup_mode_max,
     };
-    // static constexpr const char* net_setup_mode_text[] = { "Off", "ESP TOUCH
-    // APP", "AP mode", "Keep connection", "OnCloud only" };
 
     enum alarm_mode_t {
         alarm_mode_off,
@@ -1066,7 +1064,6 @@ struct config_param_t {
         {"WiFi Setting", "WiFi设置", "WiFi設定"},
         (const localize_text_t[]){
             {"Off", "关闭AP", "オフ"},
-            {"ESP TOUCH APP", "通过ESP TOUCH APP配置", "ESP TOUCHアプリ"},
             {"AP mode", "连接本机AP热点", "アクセスポイントモード"},
         },
         net_setup_mode_t ::net_setup_mode_off,
@@ -1297,8 +1294,8 @@ struct draw_param_t : public config_param_t {
     uint8_t update_count      = 0;
     uint8_t modify_count      = 0;
     uint32_t draw_count       = 0;
-    int8_t battery_state;
-    int8_t battery_level;
+    int8_t battery_state = m5::Power_Class::charge_unknown;
+    int8_t battery_level = -1;
     uint8_t font_height     = 8;
     bool oncloud_conf_valid = false;
     uint8_t macaddr[8];
@@ -1318,10 +1315,11 @@ struct draw_param_t : public config_param_t {
     std::string net_tmp_ssid;  // APモードで設定のために一時的に利用するSSID
     std::string
         net_tmp_pwd;  // APモードで設定のために一時的に利用するパスワード
+    std::string net_ap_wifi_qr;  // Wi-Fi credentials for joining the setup AP
     std::string net_ap_url;    // APモードアクセス用URL
     std::string net_url_mdns;  // mDNS名アクセス用URL
     std::string net_url_ip;    // mDNS名アクセス用URL
-    std::string net_hostname;  // T-Lite_xxxx.local
+    std::string net_hostname;  // DNS host label, without .local
     std::string cloud_url;
     IPAddress cloud_ip;
 
