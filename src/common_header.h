@@ -1294,10 +1294,10 @@ struct draw_param_t : public config_param_t {
     uint8_t update_count      = 0;
     uint8_t modify_count      = 0;
     uint32_t draw_count       = 0;
-    int8_t battery_state = m5::Power_Class::charge_unknown;
-    int8_t battery_level = -1;
-    uint8_t font_height     = 8;
-    bool oncloud_conf_valid = false;
+    int8_t battery_state      = m5::Power_Class::charge_unknown;
+    int8_t battery_level      = -1;
+    uint8_t font_height       = 8;
+    bool oncloud_conf_valid   = false;
     uint8_t macaddr[8];
 
     enum cloud_status_t {
@@ -1316,10 +1316,10 @@ struct draw_param_t : public config_param_t {
     std::string
         net_tmp_pwd;  // APモードで設定のために一時的に利用するパスワード
     std::string net_ap_wifi_qr;  // Wi-Fi credentials for joining the setup AP
-    std::string net_ap_url;    // APモードアクセス用URL
-    std::string net_url_mdns;  // mDNS名アクセス用URL
-    std::string net_url_ip;    // mDNS名アクセス用URL
-    std::string net_hostname;  // DNS host label, without .local
+    std::string net_ap_url;      // APモードアクセス用URL
+    std::string net_url_mdns;    // mDNS名アクセス用URL
+    std::string net_url_ip;      // mDNS名アクセス用URL
+    std::string net_hostname;    // DNS host label, without .local
     std::string cloud_url;
     IPAddress cloud_ip;
 

@@ -723,7 +723,8 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
             client->print(HTTP_200_html);
             client->print(
                 "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
-                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<meta name='viewport' "
+                "content='width=device-width,initial-scale=1'>"
                 "<title>T-Lite WiFi setup</title></head><body>"
                 "<h1>WiFi settings saved</h1>"
                 "<p>T-Lite is connecting to the selected network.</p>"
@@ -822,7 +823,7 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
         WiFi.scanDelete();
         WiFi.scanNetworks(true);
     }
-    int count = WiFi.scanComplete();
+    int count         = WiFi.scanComplete();
     bool scan_running = count == WIFI_SCAN_RUNNING;
     if (count == WIFI_SCAN_FAILED) {
         WiFi.scanNetworks(true);
@@ -868,7 +869,8 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
                 escaped.c_str());
         }
     }
-    client->print("<a href='javascript:void(0);' onclick='r()'>Refresh networks</a>");
+    client->print(
+        "<a href='javascript:void(0);' onclick='r()'>Refresh networks</a>");
     client->print("<datalist id='ssid-list'>");
     for (int i = 0; i < count; ++i) {
         const String ssid = WiFi.SSID(i);
@@ -904,17 +906,17 @@ static bool response_health(draw_param_t* draw_param, connection_t* conn) {
     const size_t heap_largest_dma =
         heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
 
-    const TaskHandle_t wifi_task = xTaskGetHandle("wifiTask");
+    const TaskHandle_t wifi_task   = xTaskGetHandle("wifiTask");
     const TaskHandle_t stream_task = xTaskGetHandle("stream");
-    const UBaseType_t web_stack = uxTaskGetStackHighWaterMark(nullptr);
+    const UBaseType_t web_stack    = uxTaskGetStackHighWaterMark(nullptr);
     const UBaseType_t wifi_stack =
         wifi_task ? uxTaskGetStackHighWaterMark(wifi_task) : 0;
     const UBaseType_t stream_stack =
         stream_task ? uxTaskGetStackHighWaterMark(stream_task) : 0;
 
-    const wifi_mode_t wifi_mode = WiFi.getMode();
+    const wifi_mode_t wifi_mode   = WiFi.getMode();
     const wl_status_t wifi_status = WiFi.status();
-    const bool sta_connected = wifi_status == WL_CONNECTED;
+    const bool sta_connected      = wifi_status == WL_CONNECTED;
     const IPAddress sta_ip = sta_connected ? WiFi.localIP() : IPAddress();
     const IPAddress ap_ip =
         (wifi_mode & WIFI_AP) ? WiFi.softAPIP() : IPAddress();
@@ -1103,9 +1105,9 @@ void webserverTask(void* arg) {
     uint32_t conn_idx         = 0;
     bool prev_connected       = false;
     bool mdns_started         = false;
-    uint32_t mdns_retry_at     = 0;
-    uint32_t prev_sta_ip       = 0;
-    uint32_t prev_ap_ip        = 0;
+    uint32_t mdns_retry_at    = 0;
+    uint32_t prev_sta_ip      = 0;
+    uint32_t prev_ap_ip       = 0;
     uint8_t restart_countdown = 0;
     uint8_t prev_active_count = 0;
     uint8_t active_count      = 0;
@@ -1146,25 +1148,26 @@ void webserverTask(void* arg) {
             }
         }
         // AP and STA may change without the HTTP server becoming disconnected.
-        const uint32_t sta_ip = WiFi.isConnected() ? uint32_t(WiFi.localIP()) : 0;
-        const uint32_t ap_ip = (WiFi.getMode() & WIFI_MODE_AP)
-                                   ? uint32_t(WiFi.softAPIP()) : 0;
+        const uint32_t sta_ip =
+            WiFi.isConnected() ? uint32_t(WiFi.localIP()) : 0;
+        const uint32_t ap_ip =
+            (WiFi.getMode() & WIFI_MODE_AP) ? uint32_t(WiFi.softAPIP()) : 0;
         if (!sta_ip || sta_ip != prev_sta_ip || ap_ip != prev_ap_ip) {
             if (mdns_started) MDNS.end();
-            mdns_started = false;
+            mdns_started  = false;
             mdns_retry_at = millis();
-            prev_sta_ip = sta_ip;
-            prev_ap_ip = ap_ip;
+            prev_sta_ip   = sta_ip;
+            prev_ap_ip    = ap_ip;
         }
-        if (sta_ip && !mdns_started &&
-            int32_t(millis() - mdns_retry_at) >= 0) {
+        if (sta_ip && !mdns_started && int32_t(millis() - mdns_retry_at) >= 0) {
             mdns_started = MDNS.begin(draw_param->net_hostname.c_str());
             if (mdns_started) {
                 MDNS.addService("http", "tcp", 80);
             } else {
                 // begin() may fail after allocating the responder.
                 MDNS.end();
-                ESP_LOGW("mDNS", "Responder startup failed; retrying in 5 seconds");
+                ESP_LOGW("mDNS",
+                         "Responder startup failed; retrying in 5 seconds");
                 mdns_retry_at = millis() + 5000;
             }
         }

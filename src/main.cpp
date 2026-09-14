@@ -1949,8 +1949,8 @@ class header_ui_t : public ui_base_t {
                 param->battery_state == m5::Power_Class::is_charging;
             const bool unknown =
                 param->battery_state == m5::Power_Class::charge_unknown;
-            const uint32_t color = charging ? 0x00FF00u
-                : (unknown ? 0x808080u : 0xFFFFFFu);
+            const uint32_t color =
+                charging ? 0x00FF00u : (unknown ? 0x808080u : 0xFFFFFFu);
             canvas->drawRect(xpos, y, 14, 10, color);
             canvas->fillRect(xpos + 14, y + 3, 2, 4, color);
             if (param->battery_level >= 0) {
@@ -2015,14 +2015,15 @@ class header_ui_t : public ui_base_t {
                     snprintf(countdown, sizeof(countdown), "%u",
                              unsigned(param->cloud_countdown_sec));
                     const lgfx::IFont* font = &fonts::Font2;
-                    if (canvas->textWidth(countdown, font) > xpos - _client_rect.x) {
+                    if (canvas->textWidth(countdown, font) >
+                        xpos - _client_rect.x) {
                         font = &fonts::Font0;
                     }
                     // Narrow layouts prioritize the three status icons.
-                    if (canvas->textWidth(countdown, font) <= xpos - _client_rect.x) {
-                        xpos -= canvas->drawString(countdown, xpos,
-                                                   _client_rect.y - canvas_y,
-                                                   font);
+                    if (canvas->textWidth(countdown, font) <=
+                        xpos - _client_rect.x) {
+                        xpos -= canvas->drawString(
+                            countdown, xpos, _client_rect.y - canvas_y, font);
                     }
                 }
             }
@@ -2244,7 +2245,7 @@ class image_ui_t : public ui_base_t {
                            param->range_temp_lower)
                           << 8) /
                          param->temp_diff;
-            v3 = (v3 < 0) ? 0 : (v3 > 255) ? 255 : v3;
+            v3         = (v3 < 0) ? 0 : (v3 > 255) ? 255 : v3;
             int32_t x1 = 0;
             for (int32_t fx = 1; fx < frame_width; ++fx) {
                 int32_t x0       = x1;
@@ -2280,7 +2281,7 @@ class image_ui_t : public ui_base_t {
                               canvas->getBuffer())[_client_rect.x + x0 +
                                                    ypos * canvas->width()];
                     for (int32_t bx = 0; bx < boxWidth; ++bx) {
-                        uint32_t v   = (v02 * (boxWidth - bx) + v13 * bx) >> 16;
+                        uint32_t v  = (v02 * (boxWidth - bx) + v13 * bx) >> 16;
                         img_buf[bx] = m5gfx::getSwap16(param->color_map[v]);
                     }
                 }
@@ -2896,9 +2897,8 @@ uint8_t changeLayout(uint8_t layout_idx) {
 }
 
 void drawTask(void*) {
-    ui_base_t* ui_list[] = {&text_ui,   &hist_ui,
-                            &image_ui,   &graph_ui,  &config_ui,
-                            &header_ui,  &qrcode_ui, &overlay_ui};
+    ui_base_t* ui_list[] = {&text_ui,   &hist_ui,   &image_ui,  &graph_ui,
+                            &config_ui, &header_ui, &qrcode_ui, &overlay_ui};
     static constexpr const uint32_t disp_buf_height = 16;
     static constexpr const size_t disp_buf_count =
         3;  // 描画バッファの数。jpegエンコーダのqueueにセットする分があるため3とする
@@ -3090,8 +3090,8 @@ static void wifiTask(void*) {
     bool rtc_sync = false;
     config_param_t::net_setup_mode_t prev_net_setup_mode =
         config_param_t::net_setup_mode_off;
-    bool prev_ap_connected  = false;
-    bool prev_sta_connected = false;
+    bool prev_ap_connected    = false;
+    bool prev_sta_connected   = false;
     uint32_t connect_retry_at = millis() + 15000;
 
     for (;;) {
@@ -3208,13 +3208,12 @@ static void wifiTask(void*) {
 
         const bool wifi_requested = (bool)draw_param.request_wifi_state;
         const bool ap_setup_active =
-            draw_param.net_setup_mode ==
-            draw_param.net_setup_mode_accesspoint;
+            draw_param.net_setup_mode == draw_param.net_setup_mode_accesspoint;
         const bool sta_enabled = WiFi.getMode() & WIFI_MODE_STA;
         if (!need_wifi_reconnect &&
-            (wifi_requested ? WiFi.isConnected()
-                            : (ap_setup_active ? !WiFi.isConnected()
-                                               : !sta_enabled))) {
+            (wifi_requested
+                 ? WiFi.isConnected()
+                 : (ap_setup_active ? !WiFi.isConnected() : !sta_enabled))) {
             continue;
         }
 
@@ -3231,7 +3230,7 @@ static void wifiTask(void*) {
                                     draw_param.net_setup_mode_off);
             }
             need_wifi_reconnect = false;
-            connect_retry_at = millis();
+            connect_retry_at    = millis();
         } else {
             if (int32_t(millis() - connect_retry_at) >= 0) {
                 if (!draw_param.net_tmp_ssid.empty()) {
@@ -3584,7 +3583,8 @@ void setup(void) {
 
     // DNS host labels cannot contain underscores. Keep the AP SSID unchanged.
     char hostname[32];
-    snprintf(hostname, sizeof(hostname), "t-lite-%02x%02x", macaddr[4], macaddr[5]);
+    snprintf(hostname, sizeof(hostname), "t-lite-%02x%02x", macaddr[4],
+             macaddr[5]);
     draw_param.net_hostname = hostname;
 
     char cbuf[32];
@@ -3608,7 +3608,8 @@ void setup(void) {
     // snprintf(cbuf, sizeof(cbuf), "http://%s/",
     // draw_param.net_apmode_ipaddr.toString().c_str()); draw_param.net_ap_url =
     // cbuf;
-    draw_param.net_ap_url = "http://" +
+    draw_param.net_ap_url =
+        "http://" +
         std::string(draw_param.net_apmode_ipaddr.toString().c_str()) + "/wifi";
 
     snprintf(cbuf, sizeof(cbuf), "%02x%02x%02x%02x%02x%02x", macaddr[0],
