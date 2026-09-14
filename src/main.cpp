@@ -3206,18 +3206,32 @@ static void wifiTask(void*) {
         //     == 0) { continue; }
         // }
 
+        const bool wifi_requested = (bool)draw_param.request_wifi_state;
+        const bool ap_setup_active =
+            draw_param.net_setup_mode ==
+            draw_param.net_setup_mode_accesspoint;
+        const bool sta_enabled = WiFi.getMode() & WIFI_MODE_STA;
         if (!need_wifi_reconnect &&
-            (((bool)draw_param.request_wifi_state) == WiFi.isConnected())) {
+            (wifi_requested ? WiFi.isConnected()
+                            : (ap_setup_active ? !WiFi.isConnected()
+                                               : !sta_enabled))) {
             continue;
         }
 
-        if ((need_wifi_reconnect || !((bool)draw_param.request_wifi_state))) {
-            WiFi.disconnect(need_wifi_reconnect ||
-                            draw_param.net_setup_mode ==
-                                draw_param.net_setup_mode_off);
+        if (need_wifi_reconnect || !wifi_requested) {
+            if (!wifi_requested && !ap_setup_active) {
+                releaseWiFiScan();
+                WiFi.disconnect(false);
+                WiFi.mode(WIFI_MODE_NULL);
+                ESP_EARLY_LOGD("DEBUG", "WiFi radio off mode:%u",
+                               WiFi.getMode());
+            } else {
+                WiFi.disconnect(need_wifi_reconnect ||
+                                draw_param.net_setup_mode ==
+                                    draw_param.net_setup_mode_off);
+            }
             need_wifi_reconnect = false;
             connect_retry_at = millis();
-            // WiFi.mode(WIFI_MODE_NULL);
         } else {
             if (int32_t(millis() - connect_retry_at) >= 0) {
                 if (!draw_param.net_tmp_ssid.empty()) {
