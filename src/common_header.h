@@ -6,7 +6,7 @@
 
 static constexpr const uint8_t firmware_ver_major = 0;
 static constexpr const uint8_t firmware_ver_minor = 0;
-static constexpr const uint8_t firmware_ver_patch = 14;
+static constexpr const uint8_t firmware_ver_patch = 15;
 
 static constexpr uint8_t frame_width  = 32;
 static constexpr uint8_t frame_height = 24;
