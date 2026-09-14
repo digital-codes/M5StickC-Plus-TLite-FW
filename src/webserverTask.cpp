@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiServer.h>
 #include <ESPmDNS.h>
+#include <esp_wifi.h>
 #include <string>
 
 #include "screenshot_streamer.hpp"
@@ -12,13 +13,13 @@
 #include "common_header.h"
 
 static constexpr const char HTTP_200_html[] =
-    "HTTP/1.1 200 OK\nContent-Type: text/html; "
-    "charset=UTF-8\nX-Content-Type-Options: nosniff\nConnection: "
-    "keep-alive\nCache-Control: no-cache\n\n";
+    "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
+    "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+    "close\r\nCache-Control: no-cache\r\n\r\n";
 static constexpr const char HTTP_200_json[] =
-    "HTTP/1.1 200 OK\nContent-Type: application/json; "
-    "charset=UTF-8\nX-Content-Type-Options: nosniff\nConnection: "
-    "keep-alive\nCache-Control: no-cache\n\n";
+    "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+    "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+    "close\r\nCache-Control: no-cache\r\n\r\n";
 static constexpr const char HTML_footer[] =
     "<div class='ft'>Copyright &copy;2022 "
     "M5Stack</div></div>\n</body></html>\n\n";
@@ -112,10 +113,50 @@ static size_t decode_uri(char* dest, const char* src, size_t bufsiz) {
     return current;
 }
 
+static std::string encode_html(const char* src) {
+    std::string result;
+    if (!src) return result;
+    while (*src) {
+        switch (*src++) {
+            case '&':
+                result += "&amp;";
+                break;
+            case '<':
+                result += "&lt;";
+                break;
+            case '>':
+                result += "&gt;";
+                break;
+            case '"':
+                result += "&quot;";
+                break;
+            case '\'':
+                result += "&#39;";
+                break;
+            default:
+                result += src[-1];
+                break;
+        }
+    }
+    return result;
+}
+
+static void release_wifi_scan(void) {
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+        esp_wifi_scan_stop();
+        const uint32_t timeout_at = millis() + 100;
+        while (WiFi.scanComplete() == WIFI_SCAN_RUNNING &&
+               int32_t(millis() - timeout_at) < 0) {
+            delay(1);
+        }
+    }
+    WiFi.scanDelete();
+}
+
 static void redirect_header(WiFiClient* client, const char* path) {
     client->printf(
-        "HTTP/1.1 302 Found\nContent-Type: text/html\nContent-Length: "
-        "0\nLocation: %s\n\n",
+        "HTTP/1.1 302 Found\r\nContent-Type: text/html\r\nContent-Length: "
+        "0\r\nConnection: close\r\nLocation: %s\r\n\r\n",
         path);
 }
 
@@ -126,7 +167,8 @@ static bool response_404(draw_param_t* draw_param, connection_t* conn) {
         redirect_header(client, "/wifi");
     } else {
         client->print(
-            "HTTP/1.1 404 Not Found\nContent-type: text/html\n\n"
+            "HTTP/1.1 404 Not Found\r\nContent-type: text/html\r\n"
+            "Connection: close\r\n\r\n"
             "404 Page not found.<br>\n\n");
     }
     return false;
@@ -392,13 +434,12 @@ static bool response_main(draw_param_t* draw_param, connection_t* conn) {
 
     // client->print(HTTP_200_html);
     client->print(
-        "HTTP/1.1 200 OK\nContent-Type: text/html; "
-        "charset=UTF-8\nX-Content-Type-Options: nosniff\nConnection: "
-        "keep-alive\nCache-Control: no-cache\n");
-    client->printf("Content-Length: %d\n\n", strbuf.size());
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
+        "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+        "close\r\nCache-Control: no-cache\r\n");
+    client->printf("Content-Length: %d\r\n\r\n", strbuf.size());
     client->write(strbuf.c_str(), strbuf.size());
-    client->print("\n");
-    return true;
+    return false;
 }
 
 static bool response_param(draw_param_t* draw_param, connection_t* conn) {
@@ -534,13 +575,12 @@ static bool response_param(draw_param_t* draw_param, connection_t* conn) {
     strbuf += "\n}\n\n";
 
     client->print(
-        "HTTP/1.1 200 OK\nContent-Type: application/json; "
-        "charset=UTF-8\nX-Content-Type-Options: nosniff\nConnection: "
-        "keep-alive\nCache-Control: no-cache\n");
-    client->printf("Content-Length: %d\n\n", strbuf.size());
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+        "close\r\nCache-Control: no-cache\r\n");
+    client->printf("Content-Length: %d\r\n\r\n", strbuf.size());
     client->write(strbuf.c_str(), strbuf.size());
-    client->print("\n");
-    return true;
+    return false;
 }
 
 static bool response_json(draw_param_t* draw_param, connection_t* conn) {
@@ -568,13 +608,12 @@ static bool response_json(draw_param_t* draw_param, connection_t* conn) {
 
     // client->print(HTTP_200_json);
     client->print(
-        "HTTP/1.1 200 OK\nContent-Type: application/json; "
-        "charset=UTF-8\nX-Content-Type-Options: nosniff\nConnection: "
-        "keep-alive\nCache-Control: no-cache\n");
-    client->printf("Content-Length: %d\n\n", strbuf.size());
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+        "close\r\nCache-Control: no-cache\r\n");
+    client->printf("Content-Length: %d\r\n\r\n", strbuf.size());
     client->write(strbuf.c_str(), strbuf.size());
-    client->print("\n");
-    return true;
+    return false;
 }
 
 static bool response_text(draw_param_t* draw_param, connection_t* conn) {
@@ -623,13 +662,13 @@ static bool response_text(draw_param_t* draw_param, connection_t* conn) {
     strbuf += "</table></body></html>\n\n";
 
     client->print(
-        "HTTP/1.1 200 OK\nContent-Type: text/html; "
-        "charset=UTF-8\nX-Content-Type-Options: nosniff\nConnection: "
-        "keep-alive\nCache-Control: no-cache\n");
-    client->printf("Content-Length: %d\n\n", strbuf.size() - 1);
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
+        "charset=UTF-8\r\nX-Content-Type-Options: nosniff\r\nConnection: "
+        "close\r\nCache-Control: no-cache\r\n");
+    client->printf("Content-Length: %d\r\n\r\n", strbuf.size());
     client->write(strbuf.c_str(), strbuf.size());
 
-    return true;
+    return false;
 }
 
 static bool response_stream(draw_param_t* draw_param, connection_t* conn) {
@@ -675,9 +714,21 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
                 password = buf;
             }
         } while (!end);
-        redirect_header(client, "/wifi");
-
         if (ssid.length()) {
+            // A STA connection cannot reliably start while an asynchronous AP
+            // scan is active. Release its result buffer as well, since the list
+            // is no longer needed after credentials have been submitted.
+            release_wifi_scan();
+            client->print(HTTP_200_html);
+            client->print(
+                "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>T-Lite WiFi setup</title></head><body>"
+                "<h1>WiFi settings saved</h1>"
+                "<p>T-Lite is connecting to the selected network.</p>"
+                "</body></html>");
+            // Let the response reach the phone before shutting down the AP.
+            delay(256);
             draw_param->sys_ssid         = ssid;
             draw_param->net_tmp_ssid     = ssid;
             draw_param->net_tmp_pwd      = password;
@@ -685,6 +736,7 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
             delay(64);
             draw_param->net_running_mode =
                 draw_param->net_running_mode_lan_cloud;
+            draw_param->net_setup_mode = draw_param->net_setup_mode_off;
             /*
                         WiFi.begin(ssid.c_str(), password.c_str());
                         client->setTimeout(10);
@@ -721,6 +773,8 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
             draw_param->net_setup_mode_off; return false;
                         }
             //*/
+        } else {
+            redirect_header(client, "/wifi");
         }
         return false;
     }
@@ -731,12 +785,13 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
         "<meta name=\"viewport\" content=\"width=device-width, "
         "initial-scale=1.0\">\n"
         "<title>T-Lite WiFi setup</title>\n"
-        "<script>function s(a){var l=document.querySelectorAll('.list "
+        "<script>function s(a){var l=document.querySelectorAll('.ls "
         "a');for(let i=0;i<l.length;i++){"
         "if(a===l[i]){a.classList.add('active')}else{l[i].classList.remove('"
         "active')}}"
         "document.getElementById('s').value=a.innerText||a.textContent;"
         "document.getElementById('p').focus();};"
+        "function r(){location.replace('/wifi?scan=1');}"
         "function h() {var p = "
         "document.getElementById('p');p.type==='text'?p.type='password':p.type="
         "'text';}"
@@ -750,6 +805,7 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
     static constexpr const char html_4[] =
         "</div><form method='POST' action='wifi'>"
         "<div class='fg'><label for='s'>SSID: </label><input name='s' id='s' "
+        "list='ssid-list' "
         "maxlength='32' autocapitalize='none' autocorrect='off' "
         "placeholder='SSID'></div>"
         "<div class='fg'><label for='p'>Password: </label><input name='p' "
@@ -761,33 +817,75 @@ static bool response_wifi(draw_param_t* draw_param, connection_t* conn) {
 
     client->print(HTTP_200_html);
     client->print(html_1);
+    if (conn->request_get == "scan=1") {
+        WiFi.scanDelete();
+        WiFi.scanNetworks(true);
+    }
+    int count = WiFi.scanComplete();
+    bool scan_running = count == WIFI_SCAN_RUNNING;
+    if (count == WIFI_SCAN_FAILED) {
+        WiFi.scanNetworks(true);
+        scan_running = true;
+    }
+    if (scan_running) {
+        client->print(
+            "<script>setTimeout(function(){location.replace('/wifi')},"
+            "1500);</script>");
+    }
     client->print(HTML_style);
     client->print(html_2);
     if (!draw_param->sys_ssid.empty()) {
+        const std::string current_ssid =
+            encode_html(draw_param->sys_ssid.c_str());
         client->print("<div class='ls'><h2>Current SSID</h2>");
         client->printf(
             "<a href='javascript:void(0);' onclick='s(this)'> %s </a>",
-            draw_param->sys_ssid.c_str());
+            current_ssid.c_str());
         client->print("</div><hr>");
     }
 
     client->print(html_3);
-    int i     = 0;
-    int count = WiFi.scanComplete();
-    for (int i = 0; i < count; ++i) {
-        auto ssid = WiFi.SSID(i);
-        client->printf(
-            "<a href='javascript:void(0);' onclick='s(this)'> %s </a>",
-            ssid.c_str());
-        // WiFi.encryptionType(i) == WIFI_AUTH_OPEN ?
-        // WiFi.RSSI(i) + "dBm";
+    if (scan_running) {
+        client->print("<p>Scanning...</p>");
+    } else if (count == 0) {
+        client->print("<p>No networks found.</p>");
+    } else {
+        for (int i = 0; i < count; ++i) {
+            const String ssid = WiFi.SSID(i);
+            if (ssid.isEmpty()) continue;
+            bool duplicate = false;
+            for (int j = 0; j < i; ++j) {
+                if (ssid == WiFi.SSID(j)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            const std::string escaped = encode_html(ssid.c_str());
+            client->printf(
+                "<a href='javascript:void(0);' onclick='s(this)'>%s</a>",
+                escaped.c_str());
+        }
     }
+    client->print("<a href='javascript:void(0);' onclick='r()'>Refresh networks</a>");
+    client->print("<datalist id='ssid-list'>");
+    for (int i = 0; i < count; ++i) {
+        const String ssid = WiFi.SSID(i);
+        if (ssid.isEmpty()) continue;
+        bool duplicate = false;
+        for (int j = 0; j < i; ++j) {
+            if (ssid == WiFi.SSID(j)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue;
+        const std::string escaped = encode_html(ssid.c_str());
+        client->printf("<option value='%s'></option>", escaped.c_str());
+    }
+    client->print("</datalist>");
     client->print(html_4);
     client->print(HTML_footer);
-
-    if (count != -1) {
-        WiFi.scanNetworks(true);
-    }
 
     return false;
 }
@@ -967,14 +1065,14 @@ void webserverTask(void* arg) {
         const uint32_t sta_ip = WiFi.isConnected() ? uint32_t(WiFi.localIP()) : 0;
         const uint32_t ap_ip = (WiFi.getMode() & WIFI_MODE_AP)
                                    ? uint32_t(WiFi.softAPIP()) : 0;
-        if (!connected || sta_ip != prev_sta_ip || ap_ip != prev_ap_ip) {
+        if (!sta_ip || sta_ip != prev_sta_ip || ap_ip != prev_ap_ip) {
             if (mdns_started) MDNS.end();
             mdns_started = false;
             mdns_retry_at = millis();
             prev_sta_ip = sta_ip;
             prev_ap_ip = ap_ip;
         }
-        if (connected && !mdns_started &&
+        if (sta_ip && !mdns_started &&
             int32_t(millis() - mdns_retry_at) >= 0) {
             mdns_started = MDNS.begin(draw_param->net_hostname.c_str());
             if (mdns_started) {

@@ -3072,6 +3072,18 @@ static bool sync_rtc_ntp(void) {
     return true;
 }
 
+static void releaseWiFiScan(void) {
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+        esp_wifi_scan_stop();
+        const uint32_t timeout_at = millis() + 100;
+        while (WiFi.scanComplete() == WIFI_SCAN_RUNNING &&
+               int32_t(millis() - timeout_at) < 0) {
+            delay(1);
+        }
+    }
+    WiFi.scanDelete();
+}
+
 // volatile bool requestWiFi = false;
 
 static void wifiTask(void*) {
@@ -3080,7 +3092,7 @@ static void wifiTask(void*) {
         config_param_t::net_setup_mode_off;
     bool prev_ap_connected  = false;
     bool prev_sta_connected = false;
-    int connecting_retry    = 0;
+    uint32_t connect_retry_at = millis() + 15000;
 
     for (;;) {
         delay(1);
@@ -3088,7 +3100,7 @@ static void wifiTask(void*) {
             prev_sta_connected = !prev_sta_connected;
             if (!prev_sta_connected) {
                 soundWiFiDisconnected();
-                connecting_retry = 0;
+                connect_retry_at = millis();
             } else {
                 soundWiFiConnected();
                 configTime(draw_param.oncloud_timezone_sec, 0, ntp_server[0],
@@ -3130,7 +3142,7 @@ static void wifiTask(void*) {
                     break;
 
                 case config_param_t::net_setup_mode_accesspoint:
-                    WiFi.scanDelete();
+                    releaseWiFiScan();
                     dnsServer.stop();
                     break;
             }
@@ -3147,12 +3159,12 @@ static void wifiTask(void*) {
                 case config_param_t::net_setup_mode_accesspoint:
                     draw_param.net_running_mode =
                         draw_param.net_running_mode_offline;
-                    WiFi.softAP(draw_param.net_apmode_ssid,
-                                draw_param.net_apmode_pass);
+                    WiFi.mode(wifi_mode_t::WIFI_MODE_APSTA);
                     WiFi.softAPConfig(draw_param.net_apmode_ipaddr,
                                       draw_param.net_apmode_ipaddr,
                                       draw_param.net_apmode_subnet);
-                    WiFi.mode(wifi_mode_t::WIFI_MODE_APSTA);
+                    WiFi.softAP(draw_param.net_apmode_ssid,
+                                draw_param.net_apmode_pass, 1, false, 4);
                     WiFi.scanNetworks(true);
                     dhcps_dns_setserver(&(draw_param.dnsip));
                     static const uint16_t DNS_PORT = 53;
@@ -3204,20 +3216,21 @@ static void wifiTask(void*) {
                             draw_param.net_setup_mode ==
                                 draw_param.net_setup_mode_off);
             need_wifi_reconnect = false;
+            connect_retry_at = millis();
             // WiFi.mode(WIFI_MODE_NULL);
         } else {
-            if (connecting_retry) {
-                --connecting_retry;
-            }
-            if (connecting_retry == 0) {
+            if (int32_t(millis() - connect_retry_at) >= 0) {
                 if (!draw_param.net_tmp_ssid.empty()) {
+                    releaseWiFiScan();
                     WiFi.begin(draw_param.net_tmp_ssid.c_str(),
                                draw_param.net_tmp_pwd.c_str());
-                    connecting_retry = 64;
                 } else {
                     WiFi.begin();
-                    connecting_retry = 512;
                 }
+                // Association and DHCP may take several seconds. Reissuing
+                // begin() during that interval aborts the attempt with
+                // ASSOC_LEAVE and can destabilize the Wi-Fi driver.
+                connect_retry_at = millis() + 15000;
                 ESP_EARLY_LOGD("DEBUG", "WiFi begin() status:%d",
                                WiFi.status());
             }
